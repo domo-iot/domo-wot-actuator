@@ -18,6 +18,12 @@ The WoT firmware for the DoMO WiFi actuators has been developed using the C++ la
 - [x] Shelly Dimmer
 - [x] Shelly RGBW
 - [x] Shelly EM
+- [x] Shelly 1 Plus
+- [x] Shelly 1PM Plus
+- [x] Shelly 2PM Plus
+
+
+
 
 # Acknowledgements
 
