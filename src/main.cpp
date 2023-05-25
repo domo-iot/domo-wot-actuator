@@ -1,13 +1,16 @@
-#ifndef SHELLYPLUS
+#if not defined(ESP32)
 #include "FS.h"
 #endif
+
 #include <Arduino.h>
 #include "HardwareController.h"
 #include "defines.h"
 #include "shelly_dimmer/STM32Updater.h"
 #include "logging.h"
-#ifdef SHELLYPLUS
+#ifdef ESP32
 #include "SPIFFS.h"
+#endif
+#ifdef SHELLY_1_PLUS
 #include "shelly_1plus/BleManager.h"
 #endif
 
@@ -87,14 +90,17 @@ DomoUpdater *updaterControllerInstance{nullptr};
 bool ShellyManager::shouldReboot = false;
 String ShellyManager::action_in_progress = "";
 
-#ifdef SHELLYPLUS
+#ifdef SHELLY_1_PLUS
 BleManager* bleManagerInstance {nullptr};
 #endif
 
+#ifdef SHELLY_2PM_PLUS
+uint8_t HardwareController::INPUT_1_PIN = 2;
+#endif
 
 void updateNetworkStatus() {
 
-    #ifndef SHELLYPLUS
+    #ifndef ESP32
     if (WiFi.getMode() != WiFiMode::WIFI_STA || !WiFi.isConnected()) {
         return;
     }
@@ -121,7 +127,7 @@ void updateNetworkStatus() {
 
 void setup(void) {
 
-    #ifndef SHELLYPLUS
+    #ifndef ESP32
     if (SPIFFS.begin()){
     #else
     if(SPIFFS.begin(true)){
@@ -169,13 +175,13 @@ void setup(void) {
 
     updaterControllerInstance = &DomoUpdater::getInstance();
 
-    #ifndef SHELLYPLUS
+    #ifndef ESP32
     LogUDP("HTTP server started");
-    #else
+    #endif
+    #ifdef SHELLY_1_PLUS
     LogUDP("WebSocket client started");
     bleManagerInstance = &BleManager::getInstance();
     bleManagerInstance->init();
-
     #endif
     LogUDP(WiFi.localIP().toString());
 
@@ -193,7 +199,7 @@ void setup(void) {
 
 inline void heapCheck() {
 
-    #ifndef SHELLYPLUS
+    #ifndef ESP32
     auto now_heap = system_get_free_heap_size();
 
     Serial.println("HEAP:" + String(now_heap));
@@ -211,24 +217,18 @@ void loop() {
 
     if(!WiFi.isConnected()) {
        #ifndef SHELLY_DIMMER
-        if(printConnectedTimer.elapsed(10000)){
+        if(printConnectedTimer.elapsed(1000)){
             Serial.println("Not connected");
         }
        #endif
     } else {
 
-        if(printConnectedTimer.elapsed(10000)){
+        if(printConnectedTimer.elapsed(1000)){
             Serial.println("Connected");
         }
     }
 
-    shellyManagerInstance->loop();
 
-    #ifdef SHELLYPLUS
-
-    bleManagerInstance->loop();
-
-    #endif
 
     static DomoTimer networkTimer{};
 
@@ -237,7 +237,16 @@ void loop() {
         heapCheck();
     }
 
+
+
+
     hardwareControllerInstance->loop();
+
+    shellyManagerInstance->loop();
+
+    #ifdef SHELLY_1_PLUS
+    bleManagerInstance->loop();
+    #endif
 
 }
 

@@ -7,11 +7,11 @@
 
 void LogUDP(const String& s) {
 
-    #ifdef SHELLY_DIMMER
+    #if defined(SHELLY_DIMMER)
     static WiFiUDP Udp;
 
     if (WiFi.isConnected()) {
-        Udp.beginPacket(IPAddress(192, 168, 1, 49), 4389);
+        Udp.beginPacket(IPAddress(10, 0, 1, 248), 4389);
         Udp.write((s+"\n").c_str());
         Udp.endPacket();
     }

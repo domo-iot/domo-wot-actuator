@@ -8,7 +8,7 @@
 
 #include <WString.h>
 #include <WiFiUdp.h>
-#ifndef SHELLYPLUS
+#ifndef ESP32
 #include <ESP8266WiFi.h>
 #else
 #include <WiFi.h>

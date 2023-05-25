@@ -1,4 +1,4 @@
-#ifndef SHELLYPLUS
+#ifndef ESP32
 #include "DS18B20Dual.h"
 #include "utils.h"
 #include "ShellyManager.h"

@@ -2,6 +2,7 @@
 #include "HardwareController.h"
 
 float HardwareController::getMCUTemperature(){
+    #ifndef ESP32
     float Vref = 1.0, Rup=32000, Rntc_base = 10000, Vcc=3.3, T1=298.15, Beta=3350;
 
     float Vntc = (float) analogRead(0)/1023*Vref; // NTC voltage
@@ -12,6 +13,9 @@ float HardwareController::getMCUTemperature(){
     float T2 = Beta/( log(Rntc/(Rntc_base*exp(-Beta/T1))) );
 
     return T2-273.15; // celsius
+    #else
+        return 0;
+    #endif
 
 }
 
@@ -24,22 +28,22 @@ void HardwareController::loop() {
     #endif
 
     // manage power readings
-    #if defined(SHELLY_1PM) || defined(SHELLY_25) || defined(SHELLY_EM)
+    #if defined(SHELLY_1PM) || defined(SHELLY_25) || defined(SHELLY_EM) || defined(SHELLY_1PM_PLUS) || defined(SHELLY_2PM_PLUS)
     this->powerMeasurementController.loop();
     #endif
 
     // manage pulse actions
-    #if defined(SHELLY_1) || defined(SHELLYPLUS) || defined(SHELLY_1PM) || defined(SHELLY_25)
+    #if defined(SHELLY_1) || defined(SHELLY_1_PLUS) || defined(SHELLY_1PM) || defined(SHELLY_25) || defined(SHELLY_1PM_PLUS) || defined(SHELLY_2PM_PLUS)
     this->handle_pulseactions();
     #endif
 
     // manage inputs
-    #if defined(SHELLY_1) || defined(SHELLYPLUS) || defined(SHELLY_1PM) || defined(SHELLY_25) || defined(SHELLY_DIMMER) || defined(SHELLY_RGBW)
+    #if defined(SHELLY_1) || defined(SHELLY_1_PLUS) || defined(SHELLY_1PM_PLUS) || defined(SHELLY_1PM) || defined(SHELLY_25) || defined(SHELLY_DIMMER) || defined(SHELLY_RGBW) || defined(SHELLY_2PM_PLUS)
     this->handle_inputs();
     #endif
 
 
-    #ifdef SHELLY_25
+    #if defined(SHELLY_25) || defined(SHELLY_2PM_PLUS)
     if (ShellyManager::getInstance().mode == ShellyOutputMode::SHUTTER) {
         this->shutterLoop();
         this->shutterRelayLoop();
@@ -51,11 +55,18 @@ void HardwareController::loop() {
     this->energyLoop();
     #endif
 
+    #ifdef SHELLY_1_PLUS
+    if (this->toReport != "") {
+        ShellyManager::getInstance().updateBeaconAdv(this->toReport.c_str());
+        this->toReport = "";
+    }
+    #endif
+
 }
 
 void HardwareController::handle_inputs() {
 
-    #if defined(SHELLY_1) || defined(SHELLYPLUS) || defined(SHELLY_1PM) || defined(SHELLY_25) || defined(SHELLY_RGBW) || defined(SHELLY_DIMMER)
+    #if defined(SHELLY_1) || defined(SHELLY_1PM_PLUS) || defined(SHELLY_1_PLUS) || defined(SHELLY_1PM) || defined(SHELLY_25) || defined(SHELLY_RGBW) || defined(SHELLY_DIMMER) || defined(SHELLY_2PM_PLUS)
     auto new_state1 = digitalRead(INPUT_1_PIN);
 
     if (new_state1 != pinState1) {
@@ -72,7 +83,7 @@ void HardwareController::handle_inputs() {
     }
     #endif
 
-    #if defined(SHELLY_25) || defined(SHELLY_DIMMER)
+    #if defined(SHELLY_25) || defined(SHELLY_DIMMER) || defined(SHELLY_2PM_PLUS)
     auto new_state2 = digitalRead(INPUT_2_PIN);
 
     if (new_state2 != pinState2) {
@@ -93,7 +104,7 @@ void HardwareController::handle_inputs() {
 
 void HardwareController::handle_ambienttemp_reading() {
 
-    #if defined(SHELLY_1) || defined(SHELLY_1PM)
+    #if defined(SHELLY_1) || defined(SHELLY_1PM) || defined(SHELLY_1PM_PLUS)
     this->searchDs18b20Sensors();
 
     if (temperatureTimer.elapsed(10000)) {
@@ -104,7 +115,7 @@ void HardwareController::handle_ambienttemp_reading() {
 }
 
 void HardwareController::handle_pulseactions() {
-    #if defined(SHELLY_1) || defined(SHELLYPLUS) || defined(SHELLY_1PM) || defined(SHELLY_25)
+    #if defined(SHELLY_1) || defined(SHELLY_1_PLUS) || defined(SHELLY_1PM) || defined(SHELLY_25) || defined(SHELLY_1PM_PLUS) || defined(SHELLY_2PM_PLUS)
     if (pulseAction1.toExecute && pulseAction1.timeout.elapsed(pulseAction1.durationMs)) {
         pulseAction1.toExecute = false;
         pulseAction1.timeout.stop();
@@ -112,7 +123,7 @@ void HardwareController::handle_pulseactions() {
     }
     #endif
 
-    #ifdef SHELLY_25
+    #if defined(SHELLY_25) || defined(SHELLY_2PM_PLUS)
     if (pulseAction2.toExecute && pulseAction2.timeout.elapsed(pulseAction2.durationMs)) {
         pulseAction2.toExecute = false;
         pulseAction2.timeout.stop();
@@ -122,7 +133,7 @@ void HardwareController::handle_pulseactions() {
 }
 
 void HardwareController::searchDs18b20Sensors() const {
-    #if defined(SHELLY_1) || defined(SHELLY_1PM)
+    #if defined(SHELLY_1) || defined(SHELLY_1PM) || defined(SHELLY_1PM_PLUS)
     static DomoTimer ds18b20SearchTimer;
     static int tries {0};
 
@@ -174,7 +185,7 @@ void HardwareController::applySavedRitenitiveState() {
     }
     #endif
 
-    #ifdef SHELLYPLUS
+    #ifdef SHELLY_1_PLUS
     if (loaded_json.containsKey("output1") && loaded_json["output1"]) {
         this->setRelay(1, true);
     }
@@ -187,8 +198,15 @@ void HardwareController::applySavedRitenitiveState() {
     }
     #endif
 
+    #ifdef SHELLY_1PM_PLUS
+    if (loaded_json.containsKey("output1") && loaded_json["output1"]) {
+        this->setRelay(1, true);
+    }
+    #endif
 
-    #ifdef SHELLY_25
+
+
+    #if defined(SHELLY_25) || defined(SHELLY_2PM_PLUS)
     auto mode = ShellyManager::getInstance().mode;
 
     if (mode == ShellyOutputMode::RELAY){
@@ -261,8 +279,14 @@ void HardwareController::applySavedRitenitiveState() {
 
 }
 
+#if defined(SHELLY_1_PLUS)
+void HardwareController::setToReport(const String &toReport) {
+    HardwareController::toReport = toReport;
+}
+#endif
 
-#ifdef SHELLY_25
+
+#if defined(SHELLY_25) || defined(SHELLY_2PM_PLUS)
 void HardwareController::stopShutterWithoutUpdatingCurrentState() {
     digitalWrite(RELAY_1_PIN, false);
     digitalWrite(RELAY_2_PIN, false);
@@ -459,6 +483,8 @@ void HardwareController::setShutter(ShutterRelayCommand cmd) {
     }
 
 }
+
+
 #endif
 
 

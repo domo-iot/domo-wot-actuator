@@ -1,4 +1,4 @@
-#ifdef SHELLYPLUS
+#ifdef SHELLY_1_PLUS
 #include "BleManager.h"
 
 void BleManager::set_temperature_mode() {
@@ -24,12 +24,12 @@ void BleManager::set_temperature_target(bool open) {
 }
 
 
-void BleManager::send_msg_for_pkt_number(){
+void BleManager::send_msg_for_pkt_number() {
     Serial.println("MSG FOR PKT NUM");
     Serial.println(this->current_pkt_number);
     Serial.flush();
 
-    if(!send_message_for_pkt_number(this->pChr, this->current_pkt_number)){
+    if (!send_message_for_pkt_number(this->pChr, this->current_pkt_number)) {
         this->valve_conn_state = ValveConnectionState::ERROR;
     }
 }
@@ -97,10 +97,23 @@ bool BleManager::connectToValve(const NimBLEAddress& macAddress){
             if(!this->pClient->connect(macAddress, false)) {
                 Serial.println("Reconnect failed");
                 Serial.flush();
+                this->valve_conn_state = ERROR;
                 return false;
             }
+
+
             Serial.println("Reconnected client");
             Serial.flush();
+
+            if(this->pClient->getRssi() < -75) {
+                this->pClient->disconnect();
+                Serial.println("Low rssi, disconnecting");
+                Serial.flush();
+                this->valve_conn_state = ERROR;
+                return false;
+            }
+
+
         }
             /** We don't already have a client that knows this device,
              *  we will check for a client that is disconnected that we can use.
@@ -115,6 +128,7 @@ bool BleManager::connectToValve(const NimBLEAddress& macAddress){
         if(NimBLEDevice::getClientListSize() >= NIMBLE_MAX_CONNECTIONS) {
             Serial.println("Max clients reached - no more connections available");
             Serial.flush();
+            this->valve_conn_state = ERROR;
             return false;
         }
 
@@ -139,9 +153,11 @@ bool BleManager::connectToValve(const NimBLEAddress& macAddress){
 
         if (!pClient->connect(macAddress, false)) {
             /** Created a client but failed to connect, don't need to keep it as it has no data */
+            pClient->disconnect();
             NimBLEDevice::deleteClient(pClient);
             Serial.println("Failed to connect, deleted client");
             Serial.flush();
+            this->valve_conn_state = ERROR;
             return false;
         }
     }
@@ -150,6 +166,7 @@ bool BleManager::connectToValve(const NimBLEAddress& macAddress){
         if (!pClient->connect(macAddress, false)) {
             Serial.println("Failed to connect");
             Serial.flush();
+            this->valve_conn_state = ERROR;
             return false;
         }
     }
@@ -158,123 +175,13 @@ bool BleManager::connectToValve(const NimBLEAddress& macAddress){
 
 }
 
-bool BleManager::connectToServerMAC(NimBLEAddress macAddress, bool open) {
-    NimBLEClient* pClient = nullptr;
-
-
-    Serial.print("Connected to: ");
-    Serial.println(pClient->getPeerAddress().toString().c_str());
-    Serial.print("RSSI: ");
-    Serial.println(pClient->getRssi());
-
-    /** Now we can read/write/subscribe the characteristics of the services we are interested in */
-    NimBLERemoteService* pSvc = nullptr;
-    NimBLERemoteCharacteristic* pChr = nullptr;
-    NimBLERemoteDescriptor* pDsc = nullptr;
-
-    //pSvc = pClient->getService("0000ffe0-0000-1000-8000-00805f9b34fb");
-    pSvc = pClient->getService("ffe0");
-
-    if(pSvc) {     /** make sure it's not null */
-        Serial.println("Got service 0000ffe0-0000-1000-8000-00805f9b34fb");
-        Serial.flush();
-
-        pChr = pSvc->getCharacteristic("0000ffe4-0000-1000-8000-00805f9b34fb");
-
-        if (pChr) {     /** make sure it's not null */
-            /** registerForNotify() has been deprecated and replaced with subscribe() / unsubscribe().
-             *  Subscribe parameter defaults are: notifications=true, notifyCallback=nullptr, response=false.
-             *  Unsubscribe parameter defaults are: response=false.
-             */
-
-
-            if (pChr->canNotify()) {
-
-                if (!pChr->subscribe(true, notifyCB, false)) {
-                    /** Disconnect if subscribe failed */
-                    pClient->disconnect();
-                    return false;
-                }
-
-                Serial.println("Subscribed to notify char 0000ffe4-0000-1000-8000-00805f9b34fb");
-                Serial.flush();
-
-                delay(3000);
-            }
-        }
-
-        pChr = pSvc->getCharacteristic("0000ffe9-0000-1000-8000-00805f9b34fb");
-        if (pChr) {     /** make sure it's not null */
-            if (pChr->canWrite()) {
-                while(!got_pkt_number || !got_comfort_temp) {
-                    delay(2000);
-                    if(!got_pkt_number) {
-                        Serial.println("Writing msg for pkt number:");
-                        Serial.println(current_pkt_number);
-                        Serial.flush();
-
-                        if (send_message_for_pkt_number(pChr, current_pkt_number)) {
-                            Serial.print("Wrote new value to: ");
-                            Serial.println(pChr->getUUID().toString().c_str());
-                        } else {
-                            /** Disconnect if write failed */
-                            pClient->disconnect();
-                            return false;
-                        }
-                        current_pkt_number++;
-
-                    } else {
-                        if(got_pkt_number && !got_comfort_temp) {
-                            Serial.println("Writing msg for comfort temp");
-                            Serial.println((char) current_pkt_number + 1);
-                            Serial.flush();
-
-                            if (send_message_for_current_mode(pChr, current_pkt_number +1 )) {
-                                Serial.print("Wrote new value to: ");
-                                Serial.println(pChr->getUUID().toString().c_str());
-                            } else {
-                                /** Disconnect if write failed */
-                                pClient->disconnect();
-                                return false;
-                            }
-
-                        }
-                    }
-                }
-
-                Serial.println("Setting comfort mode");
-                Serial.println(current_pkt_number+1);
-                Serial.flush();
-
-                if(!set_comfort_mode(pChr, current_pkt_number + 1, current_mode)){
-                    pClient->disconnect();
-                    return false;
-                }
-
-                delay(2000);
-                Serial.println("Setting comfort temperature");
-                Serial.println(current_pkt_number+2);
-                Serial.flush();
-
-                if(!set_comfort_temperature(pChr, current_pkt_number + 2, open)){
-                    pClient->disconnect();
-                    return false;
-                }
-
-                pClient->disconnect();
-                return true;
-
-            }
-        }
-    }
-    else {
-        Serial.println("Service not found.");
-    }
-
-    return true;
-}
 
 void BleManager::controlRadiator(const String& macAddress, bool open){
+
+
+    #ifdef SHELLY_1_PLUS
+    Lockguard l(BleManager::getInstance().bleStateMutex);
+    #endif
 
     Serial.println("VALVE OP");
     Serial.println(open);
@@ -285,12 +192,26 @@ void BleManager::controlRadiator(const String& macAddress, bool open){
 
     this->operation_in_progress = true;
 
+    this->valve_operation_total_attempts = 0;
+
     // we stop scanning for advertisements
-    this->pScan->stop();
+    int tries = 0;
+    while(!this->pScan->stop() && tries < 5) {
+        Serial.println("Stopping scan tentative number ");
+        Serial.println(tries);
+        tries++;
+    }
+
+    if(tries == 5) {
+        this->operation_in_progress = false;
+        return;
+    }
+
     this->scan_in_progress = false;
 
     this->reset_valve_variables();
 
+    this->valve_operation_timer.start();
     this->desired_state.mac_address = macAddress;
     this->desired_state.open = open;
 
@@ -301,25 +222,45 @@ void BleManager::controlRadiator(const String& macAddress, bool open){
 
 void BleManager::loop(){
 
+#ifdef SHELLY_1_PLUS
+    Lockguard l(BleManager::getInstance().bleStateMutex);
+    #endif
+
     if(!this->operation_in_progress) {
         if(!this->scan_in_progress) {
             this->pScan->start(0, scanEndedCB);
             this->scan_in_progress = true;
         }
+
         return;
     };
+
 
 
     if(this->valve_conn_state == ERROR) {
         Serial.println("Valve operation error");
         Serial.flush();
 
-        this->reset_valve_variables();
-        this->operation_in_progress = false;
+
+        this->valve_operation_total_attempts++;
+        if(this->valve_operation_total_attempts == 3) {
+            this->reset_valve_variables();
+            this->operation_in_progress = false;
+        } else {
+            DesiredValveState desired_state;
+            desired_state.open =  this->desired_state.open;
+            desired_state.mac_address = this->desired_state.mac_address;
+            this->reset_valve_variables();
+            this->desired_state = desired_state;
+            this->valve_conn_state = JUST_STARTED;
+            this->valve_operation_timer.start();
+        }
     }
 
-    if(this->valve_conn_state == JUST_STARTED) {
+    if(this->valve_conn_state == JUST_STARTED && (this->valve_operation_total_attempts == 0 || this->valve_operation_timer.elapsed(5000, false))) {
         Serial.println("Valve operation JUST STARTED");
+        Serial.println("Connection attempt number");
+        Serial.println(this->valve_operation_total_attempts);
         Serial.flush();
 
         NimBLEAddress addr(this->desired_state.mac_address.c_str());
@@ -328,9 +269,22 @@ void BleManager::loop(){
         this->connectToValve(addr);
     }
 
-    if(this->valve_conn_state == CONNECTING && this->valve_operation_timer.elapsed(1000, false)) {
-       this->reset_valve_variables();
-       this->operation_in_progress = false;
+    if(this->valve_conn_state == CONNECTING && this->valve_operation_timer.elapsed(3000, false)) {
+
+        this->valve_operation_total_attempts++;
+        if(this->valve_operation_total_attempts == 3) {
+            this->reset_valve_variables();
+            this->operation_in_progress = false;
+        } else {
+            DesiredValveState desired_state;
+            desired_state.open =  this->desired_state.open;
+            desired_state.mac_address = this->desired_state.mac_address;
+            this->reset_valve_variables();
+            this->desired_state = desired_state;
+            this->valve_conn_state = JUST_STARTED;
+            this->valve_operation_timer.start();
+        }
+
     }
 
     if(this->valve_conn_state == CONNECTED) {
@@ -343,8 +297,19 @@ void BleManager::loop(){
 
     if(this->valve_conn_state == SUBSCRIBING_TO_NOTIFYCHAR &&
             this->valve_operation_timer.elapsed(3000, false)){
-        this->reset_valve_variables();
-        this->operation_in_progress = false;
+        this->valve_operation_total_attempts++;
+        if(this->valve_operation_total_attempts == 3) {
+            this->reset_valve_variables();
+            this->operation_in_progress = false;
+        } else {
+            DesiredValveState desired_state;
+            desired_state.open =  this->desired_state.open;
+            desired_state.mac_address = this->desired_state.mac_address;
+            this->reset_valve_variables();
+            this->desired_state = desired_state;
+            this->valve_conn_state = JUST_STARTED;
+            this->valve_operation_timer.start();
+        }
     }
 
     if(this->valve_conn_state == SUB_TO_NOTIFYCHAR) {
@@ -359,8 +324,20 @@ void BleManager::loop(){
 
 
     if(this->valve_conn_state == SEARCH_FOR_PKT_NUMBER && attempts > 5){
-        this->reset_valve_variables();
-        this->operation_in_progress = false;
+        this->valve_operation_total_attempts++;
+        if(this->valve_operation_total_attempts == 3) {
+            this->reset_valve_variables();
+            this->operation_in_progress = false;
+        } else {
+            DesiredValveState desired_state;
+            desired_state.open =  this->desired_state.open;
+            desired_state.mac_address = this->desired_state.mac_address;
+            this->reset_valve_variables();
+            this->desired_state = desired_state;
+            this->valve_conn_state = JUST_STARTED;
+            this->valve_operation_timer.start();
+        }
+
     } else {
         if (this->valve_conn_state == SEARCH_FOR_PKT_NUMBER &&
             this->valve_operation_timer.elapsed(500, true)) {
@@ -380,15 +357,25 @@ void BleManager::loop(){
     }
 
     if(this->valve_conn_state == SEARCH_FOR_CURRENT_TEMP &&
-       this->valve_operation_timer.elapsed(1000, false)) {
-        this->reset_valve_variables();
-        this->operation_in_progress = false;
+       this->valve_operation_timer.elapsed(2000, false)) {
+        this->valve_operation_total_attempts++;
+        if(this->valve_operation_total_attempts == 3) {
+            this->reset_valve_variables();
+            this->operation_in_progress = false;
+        } else {
+            DesiredValveState desired_state;
+            desired_state.open =  this->desired_state.open;
+            desired_state.mac_address = this->desired_state.mac_address;
+            this->reset_valve_variables();
+            this->desired_state = desired_state;
+            this->valve_conn_state = JUST_STARTED;
+            this->valve_operation_timer.start();
+        }
     }
 
-    if(this->valve_conn_state == GOT_CURRENT_TEMP && this->valve_operation_timer.elapsed(1000, false)){
+    if(this->valve_conn_state == GOT_CURRENT_TEMP && this->valve_operation_timer.elapsed(2000, false)){
         Serial.println("Valve operation GOT_CURRENT_TEMP");
         Serial.flush();
-
         this->valve_conn_state = SETTING_MODE;
         this->valve_operation_timer.start();
         this->set_temperature_mode();
@@ -396,11 +383,21 @@ void BleManager::loop(){
 
     if(this->valve_conn_state == SETTING_MODE &&
         this->valve_operation_timer.elapsed(2000, false)) {
-        this->reset_valve_variables();
-        this->operation_in_progress = false;
+        if(this->valve_operation_total_attempts == 3) {
+            this->reset_valve_variables();
+            this->operation_in_progress = false;
+        } else {
+            DesiredValveState desired_state;
+            desired_state.open =  this->desired_state.open;
+            desired_state.mac_address = this->desired_state.mac_address;
+            this->reset_valve_variables();
+            this->desired_state = desired_state;
+            this->valve_conn_state = JUST_STARTED;
+            this->valve_operation_timer.start();
+        }
     }
 
-    if(this->valve_conn_state == SET_MODE && this->valve_operation_timer.elapsed(1000, false)){
+    if(this->valve_conn_state == SET_MODE && this->valve_operation_timer.elapsed(2000, false)){
         Serial.println("Valve operation SET_MODE");
         Serial.flush();
 
@@ -411,19 +408,33 @@ void BleManager::loop(){
 
     if(this->valve_conn_state == SETTING_TEMP &&
        this->valve_operation_timer.elapsed(2000, false)) {
-        this->reset_valve_variables();
-        this->operation_in_progress = false;
+        this->valve_operation_total_attempts++;
+        if(this->valve_operation_total_attempts == 3) {
+            this->reset_valve_variables();
+            this->operation_in_progress = false;
+        } else {
+            DesiredValveState desired_state;
+            desired_state.open =  this->desired_state.open;
+            desired_state.mac_address = this->desired_state.mac_address;
+            this->reset_valve_variables();
+            this->desired_state = desired_state;
+            this->valve_conn_state = JUST_STARTED;
+            this->valve_operation_timer.start();
+        }
     }
 
-    if(this->valve_conn_state == SET_TEMP && this->valve_operation_timer.elapsed(1000, false)) {
+    if(this->valve_conn_state == SET_TEMP && this->valve_operation_timer.elapsed(2000, false)) {
         Serial.println("Valve operation SET_TEMP");
         Serial.flush();
+
+
+        this->operation_in_progress = false;
 
         ShellyManager::getInstance().updateValveOperation(
                  this->desired_state.mac_address + " " +
                                 this->desired_state.open);
+
         this->reset_valve_variables();
-        this->operation_in_progress = false;
 
     }
 

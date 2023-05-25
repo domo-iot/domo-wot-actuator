@@ -34,8 +34,6 @@ enum ShutterCommand{
 };
 
 
-
-
 struct RGBWStatus{
     uint32_t r;
     uint32_t g;

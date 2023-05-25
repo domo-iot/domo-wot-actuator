@@ -1,10 +1,10 @@
 #ifndef DOMO_ESP_DOMOSTATE_H
 #define DOMO_ESP_DOMOSTATE_H
-#ifndef SHELLYPLUS
+#ifndef ESP32
 #include "FS.h"
 #endif
 
-#ifdef SHELLYPLUS
+#ifdef ESP32
 #include "SPIFFS.h"
 #endif
 
@@ -12,14 +12,21 @@
 #include <memory>
 #include "utils.h"
 #include "logging.h"
-#ifndef SHELLYPLUS
+#ifndef ESP32
 #include <ESP8266WebServerSecure.h>
 #include "bearssl/WebSockets4WebServerSecure.h"
 #endif
 #include "domowebthings/Thing.h"
 #include "domowebthings/WebThingAdapter.h"
+#include "Mutex.h"
+
+#include<vector>
 
 class ShellyManager {
+public:
+    bool isOutput1() const;
+
+    bool isOutput2() const;
 
 public:
 
@@ -28,16 +35,23 @@ public:
         return String("shelly_1");
       #endif
 
-      #if defined(SHELLYPLUS)
+      #if defined(SHELLY_1_PLUS)
         return String("shelly_1plus");
       #endif
 
-      #if defined(SHELLY_1PM)
+      #if defined(SHELLY_1PM_PLUS)
+            return String("shelly_1pm_plus");
+      #endif
+      #if defined(SHELLY_2PM_PLUS)
+        return String("shelly_2pm_plus");
+      #endif
+     #if defined(SHELLY_1PM)
         return String("shelly_1pm");
       #endif
       #if defined(SHELLY_25)
         return String("shelly_25");
       #endif
+
 
       #if defined(SHELLY_DIMMER)
         return String("shelly_dimmer");
@@ -59,12 +73,19 @@ public:
         return String("shelly_1");
       #endif
 
-      #if defined(SHELLYPLUS)
+      #if defined(SHELLY_1_PLUS)
         return String("shelly_1plus");
       #endif
 
+        #if defined(SHELLY_1PM_PLUS)
+                return String("shelly_1pm_plus");
+        #endif
+#if defined(SHELLY_2PM_PLUS)
+        return String("shelly_2pm_plus");
+#endif
 
-      #if defined(SHELLY_1PM)
+
+#if defined(SHELLY_1PM)
         return String("shelly_1pm");
       #endif
 
@@ -191,9 +212,12 @@ public:
 
     void reportAsyncEnergyAndPower(float power, float energy);
 
+    void reportPeriodicEnergyAndPower25(float power1, float energy1, float power2, float energy2);
+
+
     void reportPeriodicEnergyAndPower1(float power1, float energy1);
 
-    #ifdef SHELLY_25
+#if defined(SHELLY_25) || defined(SHELLY_2PM_PLUS)
     void reportPeriodicEnergyAndPower2(float power2, float energy2);
     #endif
 
@@ -228,11 +252,17 @@ public:
 
 protected:
 
+    #ifdef SHELLY_1_PLUS
+    mutable Mutex stateMutex{};
+    #endif
+
     void updateState(const String updated_properties[], uint16_t changed_props_num);
 
     String serialized_shelly_state = "";
 
     DynamicJsonDocument status{1024};
+
+    std::vector<String> pending_updated_props;
 
     const char *shellyTypes[2] = {"shelly", nullptr};
 

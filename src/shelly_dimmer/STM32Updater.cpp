@@ -1,7 +1,7 @@
 #include "STM32Updater.h"
 #include "utils.h"
 #include "logging.h"
-#ifndef SHELLYPLUS
+#ifndef ESP32
 #include <ESP8266HTTPClient.h>
 #include <WiFiClientSecureBearSSL.h>
 

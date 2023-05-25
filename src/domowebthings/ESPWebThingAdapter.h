@@ -1,7 +1,7 @@
 #pragma once
 
 #include <ArduinoJson.h>
-#ifndef SHELLYPLUS
+#ifndef ESP32
 #include <ESP8266WebServerSecure.h>
 #include "../bearssl/WebSockets4WebServerSecure.h"
 #else
@@ -36,7 +36,7 @@
 #endif
 #endif
 
-#ifdef SHELLYPLUS
+#ifdef SHELLY_1_PLUS
 /*
 const char ENDPOINT_CA_CERT[] PROGMEM = R"EOF(
 -----BEGIN CERTIFICATE-----
@@ -70,7 +70,7 @@ class WebThingAdapter {
 public:
   WebThingAdapter(String _name, IPAddress _ip, uint16_t _port)
       : name(_name), ip(_ip.toString()), port(_port) {
-        #ifndef SHELLYPLUS
+        #ifndef ESP32
         this->server = new BearSSL::ESP8266WebServerSecure(port);
         this->webSocket = new WebSockets4WebServerSecure;
         #else
@@ -80,7 +80,7 @@ public:
 
   void begin() {
 
-    #ifndef SHELLYPLUS
+    #ifndef ESP32
     name.toLowerCase();
     if (MDNS.begin(this->name.c_str())) {
       Serial.println("MDNS responder started");
@@ -138,12 +138,15 @@ public:
   }
 
   void update() {
-    #ifndef SHELLYPLUS
+
+    #ifndef ESP32
     this->server->handleClient();
     this->webSocket->loop();
     MDNS.update();
     #else
+
     this->webSocket->loop();
+
     #endif
 
 
@@ -165,7 +168,7 @@ public:
       this->lastDevice = device;
     }
 
-    #ifndef SHELLYPLUS
+    #ifndef ESP32
     this->server->addHook(webSocket->hookForWebserver("/things/" + device->id,
                                                       std::bind(&WebThingAdapter::webSocketEvent,
                                                                 this, std::placeholders::_1,
@@ -186,7 +189,7 @@ public:
 
 private:
 
-  #ifndef SHELLYPLUS
+  #ifndef ESP32
   BearSSL::ESP8266WebServerSecure* server;
   WebSockets4WebServerSecure* webSocket;
   String serverCert;
@@ -234,7 +237,7 @@ private:
     if (dataToSend) {
       String jsonStr;
       serializeJson(message, jsonStr);
-      #ifndef SHELLYPLUS
+      #ifndef ESP32
       // Inform all connected ws clients of a Thing about changed properties
       ((WebSockets4WebServerSecure *)device->ws)->broadcastTXT(jsonStr);
       #else
@@ -245,10 +248,11 @@ private:
     }
   }
 
-  #ifndef SHELLYPLUS
+  #ifndef ESP32
   void webSocketEvent(uint8_t num, WStype_t type, uint8_t * rawData, size_t len) {
 
         auto device = this->firstDevice;
+
 
         if (type == WStype_DISCONNECTED || type == WStype_ERROR) {
             this->webSocket->disconnect();

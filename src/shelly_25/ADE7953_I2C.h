@@ -23,6 +23,8 @@ public:
 
     void initialize();
 
+    uint8_t i2cAlgorithm8_read_tryWire(TwoWire* tryWire, byte MSB,
+                                                byte LSB);
     uint8_t i2cAlgorithm8_read(byte MSB, byte LSB);
 
     uint16_t i2cAlgorithm16_read(byte MSB, byte LSB);

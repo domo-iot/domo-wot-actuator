@@ -11,6 +11,7 @@ and ESP8266  Created by Umar Kazmi, Crystal Lai, and Michael Klopfer, Ph.D.
 #include "Arduino.h"
 #include <Wire.h>
 #include "ADE7953_I2C.h"
+#include "HardwareController.h"
 
 #undef ADE7953_VERBOSE_DEBUG //This line turns on verbose debug via serial monitor (Normally off or //'ed).  Use sparingly and in a test program!  Turning this on can take a lot of memory!  This is non-specific and for all functions, beware, it's a lot of output!  Reported bytes are in HEX
 int ADE_Address = 56;//I2C Address of ADE7953, or using equivalent value in hex: 0x38
@@ -603,7 +604,33 @@ void ADE7953::initialize() {
 
     Serial.print("ADE7953:initialize function started \n");
 
-    Wire.begin(12, 14);
+    #if defined(SHELLY_25) || defined(SHELLY_EM)
+        Wire.begin(12, 14);
+    #endif
+
+    #if defined(SHELLY_2PM_PLUS)
+      Serial.println("Trying Using 33, 25 as SDA, SCL");
+
+      uint8_t sda = 33;
+      uint8_t scl = 25;
+
+      TwoWire* wireTry = new TwoWire(1);
+      wireTry->begin(sda, scl);
+      delay(50);
+      uint8_t version = this->i2cAlgorithm8_read_tryWire(wireTry, functionBitVal(Version_8, 1), functionBitVal(Version_8,
+                                                                                                               0));
+      Serial.println("VERSION:");
+      Serial.println(version);
+      if(version != 2) {
+              Serial.println("Using 26, 25 as SDA, SCL");
+              sda = 26;
+              HardwareController::INPUT_1_PIN=5;
+      }
+
+      delete wireTry;
+      Wire.begin(sda, scl);
+    #endif
+
     delay(50);
 //    pinMode(_CS, OUTPUT);
 //    pinMode(_CLK, OUTPUT);
@@ -635,9 +662,9 @@ void ADE7953::initialize() {
     Wire.write(0x00);
     Wire.write(0x30);
     Wire.endTransmission();
-    delayMicroseconds(5);//Bus-free time minimum 4.7us
+    delayMicroseconds(5); //Bus-free time minimum 4.7us
 
-    Serial.print(" ADE7953:initialize function completed");
+    Serial.print("ADE7953:initialize function completed");
 
     //Calibrations
     i2cAlgorithm16_write((functionBitVal(PHCALA_16, 1)), (functionBitVal(PHCALA_16, 0)), 0x00,
@@ -677,6 +704,42 @@ byte ADE7953::functionBitVal(int addr, uint8_t byteVal) {
 #endif
 
     return x;
+}
+
+uint8_t ADE7953::i2cAlgorithm8_read_tryWire(TwoWire* tryWire, byte MSB,
+                                    byte LSB) { //This is the algorithm that reads from a register in the ADE7953. The arguments are the MSB and LSB of the address of the register respectively. The values of the arguments are obtained from the list of functions above.
+#ifdef ADE7953_VERBOSE_DEBUG
+    Serial.print("\n ADE7953::i2cAlgorithm8_read function started ");
+#endif
+    uint8_t readval_unsigned = 0;  //This variable is the unsigned integer value to compile read bytes into (if needed)
+    byte one;
+
+    tryWire->beginTransmission(ADE_Address);
+    tryWire->write(MSB);
+    tryWire->write(LSB);
+    tryWire->endTransmission(0);
+
+    tryWire->requestFrom(ADE_Address, 1);    //Request 1 Byte from the specified address
+    if (tryWire->available() >= 1) {    //Wait for response
+        one = tryWire->read();
+    }
+    //Wire.endTransmission();//prevent bus being taken from other devices
+
+#ifdef ADE7953_VERBOSE_DEBUG
+    Serial.print("\nADE7953::i2cAlgorithm8_read function details: ");
+    Serial.print("\nAddress Byte 1(MSB)[HEX]: ");
+    Serial.print(MSB, HEX);
+    Serial.print("\n Address Byte 2(LSB)[HEX]: ");
+    Serial.print(LSB, HEX);
+    Serial.print("\n Returned bytes (1 for 8-bit return form): ");
+    Serial.print(one, HEX);
+    Serial.print("\n ADE7953::i2cAlgorithm8_read function completed ");
+#endif
+
+    //Post-read packing and bitshifting operation
+    readval_unsigned = one;  //Process MSB (nothing much to see here for only one 8 bit value)
+
+    return readval_unsigned;  //uint8_t versus long because it is only an 8 bit value, function returns uint8_t.
 }
 
 

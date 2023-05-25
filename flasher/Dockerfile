@@ -66,6 +66,12 @@ RUN mkdir -p /work_dir/.pio/build/shellyrgbw
 
 RUN mkdir -p /work_dir/.pio/build/shelly1plus
 
+RUN mkdir -p /work_dir/.pio/build/shelly1pmplus
+
+RUN mkdir -p /work_dir/.pio/build/shelly2pmplus
+
+RUN mkdir -p /work_dir/.pio/build/shelly2pmplussolo
+
 # create data dir inside pio folder
 RUN mkdir -p /work_dir/data/ /fw_binaries
 

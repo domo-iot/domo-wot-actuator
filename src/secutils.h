@@ -6,7 +6,7 @@
 #include "logging.h"
 #include <WString.h>
 
-#ifndef SHELLYPLUS
+#ifndef ESP32
 bool getDomoSecMaterial(String &serverCert, String &serverKey,  String& authUser,  String& authPassword);
 
 #else

@@ -26,16 +26,49 @@ class DoMOActuatorFlasher:
         result = subprocess.run(["esptool.py", "chip_id"], stdout=subprocess.PIPE).stdout.decode('utf-8')
         print(result)
         res = result.split('\n')
+
+        # Features: WiFi, BT, Single Core, Embedded Flash, VRef calibration in efuse, Coding Scheme None
         mac = ""
+        single_core = False
         for r in res:
             if r.find("MAC") != -1:
                 r = r.replace("MAC", "")
                 r = r.replace(":", "")
                 mac = r
-        return mac
+            if r.find("Features") != -1 and r.find("Single Core") != -1:
+                single_core = True
+                print("SINGLE CORE")
+            if r.find("Features") != -1 and r.find("Dual Core") != -1:
+                single_core = False
+                print("DUAL CORE")
+        return mac, single_core
 
     def run_flasher_esp32(self):
         cmd = "esptool.py --chip esp32 --port \"/dev/ttyUSB0\" --baud 460800 --before default_reset --after hard_reset write_flash -z --flash_mode dio --flash_freq 40m --flash_size 4MB 0x1000 /root/.platformio/packages/framework-arduino-solo1/tools/sdk/esp32/bin/bootloader_dio_40m.bin 0x8000 .pio/build/shelly1plus/partitions.bin 0xe000 /root/.platformio/packages/framework-arduino-solo1/tools/partitions/boot_app0.bin 0x10000 .pio/build/shelly1plus/firmware.bin"
+        print("Executing %s" % cmd)
+        p = subprocess.Popen(cmd,
+                             bufsize=1, shell=True, stderr=sys.stderr, stdout=sys.stdout)
+        p.wait()
+        return p.returncode == 0
+
+    def run_flasher_esp32_1pm(self):
+        cmd = "esptool.py --chip esp32 --port \"/dev/ttyUSB0\" --baud 460800 --before default_reset --after hard_reset write_flash -z --flash_mode dio --flash_freq 40m --flash_size 4MB 0x1000 /root/.platformio/packages/framework-arduino-solo1/tools/sdk/esp32/bin/bootloader_dio_40m.bin 0x8000 .pio/build/shelly1pmplus/partitions.bin 0xe000 /root/.platformio/packages/framework-arduino-solo1/tools/partitions/boot_app0.bin 0x10000 .pio/build/shelly1pmplus/firmware.bin"
+        print("Executing %s" % cmd)
+        p = subprocess.Popen(cmd,
+                             bufsize=1, shell=True, stderr=sys.stderr, stdout=sys.stdout)
+        p.wait()
+        return p.returncode == 0
+
+    def run_flasher_esp32_2pm(self):
+        cmd = "esptool.py --chip esp32 --port \"/dev/ttyUSB0\" --baud 460800 --before default_reset --after hard_reset write_flash -z --flash_mode dio --flash_freq 40m --flash_size 4MB 0x1000 /root/.platformio/packages/framework-arduino-espressif32/tools/sdk/esp32/bin/bootloader_dio_40m.bin 0x8000 .pio/build/shelly2pmplus/partitions.bin 0xe000 /root/.platformio/packages/framework-arduino-espressif32/tools/partitions/boot_app0.bin 0x10000 .pio/build/shelly2pmplus/firmware.bin"
+        print("Executing %s" % cmd)
+        p = subprocess.Popen(cmd,
+                             bufsize=1, shell=True, stderr=sys.stderr, stdout=sys.stdout)
+        p.wait()
+        return p.returncode == 0
+
+    def run_flasher_esp32_2pm_solo(self):
+        cmd = "esptool.py --chip esp32 --port \"/dev/ttyUSB0\" --baud 460800 --before default_reset --after hard_reset write_flash -z --flash_mode dio --flash_freq 40m --flash_size 4MB 0x1000 /root/.platformio/packages/framework-arduino-solo1/tools/sdk/esp32/bin/bootloader_dio_40m.bin 0x8000 .pio/build/shelly2pmplussolo/partitions.bin 0xe000 /root/.platformio/packages/framework-arduino-solo1/tools/partitions/boot_app0.bin 0x10000 .pio/build/shelly2pmplussolo/firmware.bin"
         print("Executing %s" % cmd)
         p = subprocess.Popen(cmd,
                              bufsize=1, shell=True, stderr=sys.stderr, stdout=sys.stdout)
@@ -73,7 +106,7 @@ class DoMOActuatorFlasher:
 
         model = "shelly_" + self.device_type.replace("shelly", "")
 
-        cmd = "./generateSecMaterial.sh " + model + " " + self.get_mac_address()
+        cmd = "./generateSecMaterial.sh " + model + " " + self.get_mac_address()[0]
         print("Executing %s" % cmd)
         p = subprocess.Popen(cmd,
                              bufsize=1, shell=True, stderr=sys.stderr, stdout=sys.stdout)
@@ -141,18 +174,20 @@ DEVICE_TYPES = {
     4: 'shellydimmer',
     5: 'shellyem',
     6: 'shellyrgbw',
-    7: 'shelly1plus'
+    7: 'shelly1plus',
+    8: 'shelly1pmplus',
+    9: 'shelly2pmplus',
 }
 
 found = False
 DEVICE_TYPE = ''
 
 while not found:
-    print("\n\nSupported devices: ")
+    print("\n\nTipi di device supportati: ")
     for i, name in DEVICE_TYPES.items():
         print("%s: %s" % (i, name))
     try:
-        selected = int(input("\nSelect type of device to flash: "))
+        selected = int(input("\nInserire il tipo di device da flashare: "))
     except Exception as ex:
         continue
 
@@ -160,15 +195,16 @@ while not found:
         DEVICE_TYPE = DEVICE_TYPES[selected]
         found = True
 
-print("Selected type: %s" % DEVICE_TYPE)
+print("Tipo di Device Selezionato: %s" % DEVICE_TYPE)
 
 PORT = "/dev/ttyUSB0"
 if len(sys.argv) > 1:
     PORT = sys.argv[1]
 
 while True:
-    input("Press a button to proceed ... ")
-
+    input("Premere un tasto per procedere con il flashing di un nuovo device ... ")
+    print("Remove data directory")
+    
     if os.path.isdir('data'):
         shutil.rmtree("./data")
     try:
@@ -193,36 +229,57 @@ while True:
         try:
             m = DoMOActuatorFlasher(PORT, DEVICE_TYPE)
             mac = ""
+            single_core = True
             while mac == "":
-                mac = m.get_mac_address()
+                (mac, single_core) = m.get_mac_address()
                 if mac == "":
-                    input("Reset board, disconnect and connect again Vcc cable  ... and press a button")
-            print("MAC Address: " + mac)
-            if DEVICE_TYPE != "shelly1plus":
+                    input("Resettare la board, staccare e riattaccare cavetto Vcc  ... e premere un tasto")
+            print("MAC Address: " + mac +  "single_core "  + str(single_core))
+            if DEVICE_TYPE != "shelly1plus" and DEVICE_TYPE != "shelly1pmplus" and DEVICE_TYPE != "shelly2pmplus":
                 ok = m.generate_keys()
                 assert ok
                 (user_login, user_password) = m.generate_sec_json_file()
-            if DEVICE_TYPE == "shelly1plus":
+            if DEVICE_TYPE == "shelly1plus" or DEVICE_TYPE == "shelly1pmplus" or DEVICE_TYPE == "shelly2pmplus":
                 (user_login, user_password) = m.generate_sec_json_file_shelly1plus()
-            input("Reset board, disconnect and connect again Vcc cable  ... and press a button")
+                if DEVICE_TYPE=="shelly2pmplus" and single_core == True:
+                    DEVICE_TYPE="shelly2pmplussolo"
+                    m = DoMOActuatorFlasher(PORT, "shelly2pmplussolo")
+            input("Resettare la board, staccare e riattaccare cavetto Vcc  ... e premere un tasto")
             print("Erasing flash")
             ok = m.run_erase()
             assert ok
-            input("Reset board, disconnect and connect again Vcc cable  ... and press a button")
+            input("Resettare la board, staccare e riattaccare cavetto Vcc  ... e premere un tasto")
             print("Uploading sec material")
             ok = m.run_uploadfs()
-            input("Reset board, disconnect and connect again Vcc cable  ... and press a button")
+            input("Resettare la board, staccare e riattaccare cavetto Vcc  ... e premere un tasto")
             print("Flashing program")
-            shutil.copy("/fw_binaries/" + DEVICE_TYPE + ".bin", "/work_dir/.pio/build/" + DEVICE_TYPE + "/firmware.bin")
-            if DEVICE_TYPE != "shelly1plus":
+            if DEVICE_TYPE != "shelly2pmplussolo":
+                shutil.copy("/fw_binaries/" + DEVICE_TYPE + ".bin", "/work_dir/.pio/build/" + DEVICE_TYPE + "/firmware.bin")
+            if DEVICE_TYPE != "shelly1plus" and DEVICE_TYPE != "shelly1pmplus" and DEVICE_TYPE != "shelly2pmplus" and DEVICE_TYPE != "shelly2pmplussolo":
                 ok = m.run_flasher()
                 assert ok
             if DEVICE_TYPE == "shelly1plus":
-                shutil.copy("/fw_binaries/partitions.bin", "/work_dir/.pio/build/shelly1plus/partitions.bin")
+                shutil.copy("/fw_binaries/partitions_shelly1plus.bin", "/work_dir/.pio/build/shelly1plus/partitions.bin")
                 ok = m.run_flasher_esp32()
                 assert ok
+            if DEVICE_TYPE == "shelly1pmplus":
+                shutil.copy("/fw_binaries/partitions_shelly1pmplus.bin", "/work_dir/.pio/build/shelly1pmplus/partitions.bin")
+                ok = m.run_flasher_esp32_1pm()
+                assert ok
+            if DEVICE_TYPE == "shelly2pmplus" and single_core == False:
+                shutil.copy("/fw_binaries/partitions_shelly2pmplus.bin", "/work_dir/.pio/build/shelly2pmplus/partitions.bin")
+                ok = m.run_flasher_esp32_2pm()
+                assert ok
+            if DEVICE_TYPE == "shelly2pmplussolo" and single_core == True:
+                print("SHELLY 2 PM PLUS SOLO")
+                shutil.copy("/fw_binaries/shelly2pmplussolo.bin", "/work_dir/.pio/build/shelly2pmplussolo/firmware.bin")
+                shutil.copy("/fw_binaries/partitions_shelly2pmplussolo.bin", "/work_dir/.pio/build/shelly2pmplussolo/partitions.bin")
+                ok = m.run_flasher_esp32_2pm_solo()
+                assert ok
+
+
             with open("/out/out.txt", "a") as file_object:
                 file_object.write(DEVICE_TYPE + "\t" + mac + "\t" + user_login + "\t" + user_password + "\n")
         except Exception as ex:
             print(ex)
-            input("Press a button to retry ...")
+            input("Un tasto per riprovare ...")

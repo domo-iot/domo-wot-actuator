@@ -1,10 +1,10 @@
-#ifndef SHELLYPLUS
+#ifndef ESP32
 #include <ESP8266WiFi.h>
 #else
 #include "WiFi.h"
 #endif
 #include <algorithm>
-#ifdef SHELLYPLUS
+#ifdef ESP32
 #include <SPIFFS.h>
 #endif
 
@@ -16,17 +16,25 @@
 
 void ShellyManager::loop() {
     adapter.update();
+    {
+        #ifdef SHELLY_1_PLUS
+        Lockguard l(this->stateMutex);
+        #endif
+        // remove pending props
+        this->pending_updated_props.clear();
+    }
     DomoUpdater::getInstance().loop();
 
     if(ShellyManager::shouldReboot) {
         ESP.restart();
         delay(1000);
-        #ifndef SHELLYPLUS
+        #ifndef ESP32
         ESP.reset();
         #else
         ESP.restart();
         #endif
     }
+
 }
 
 void ShellyManager::update_action_handler(const String& firmware_url, const String& firmware_version) {
@@ -69,16 +77,16 @@ void ShellyManager::updateState(const String updated_properties[], uint16_t chan
     status["input1"] = this->input1;
     #endif
 
-    #if defined(SHELLY_25)  || defined(SHELLY_DIMMER)
+    #if defined(SHELLY_25)  || defined(SHELLY_DIMMER) || defined(SHELLY_2PM_PLUS)
     status["input2"] = this->input2;
     #endif
 
-    #if defined(SHELLY_1PM)  || defined(SHELLY_25) || defined(SHELLY_DIMMER)
+    #if defined(SHELLY_1PM)  || defined(SHELLY_25) || defined(SHELLY_DIMMER) || defined(SHELLY_1PM_PLUS) || defined(SHELLY_2PM_PLUS)
     status["power1"] = this->power1;
     status["energy1"] = this->energy1;
     #endif
 
-    #if defined(SHELLY_25)
+    #if defined(SHELLY_25) || defined(SHELLY_2PM_PLUS)
     status["power2"] = this->power2;
     status["energy2"] = this->energy2;
     #endif
@@ -87,13 +95,13 @@ void ShellyManager::updateState(const String updated_properties[], uint16_t chan
         status["output1"] = this->output1;
     }
 
-    #if defined(SHELLY_25)
+    #if defined(SHELLY_25) || defined(SHELLY_2PM_PLUS)
     if (this->mode == ShellyOutputMode::RELAY) {
         status["output2"] = this->output2;
     }
     #endif
 
-    #if defined(SHELLY_25)
+    #if defined(SHELLY_25) || defined(SHELLY_2PM_PLUS)
     if(this->mode == ShellyOutputMode::SHUTTER) {
         status["shutter_status"] = this->shutterStatus;
         status["inverted"] = this->inverted;
@@ -110,7 +118,7 @@ void ShellyManager::updateState(const String updated_properties[], uint16_t chan
     status["rgbw_status"] = this->rgbwStatus.string_representation;
     #endif
 
-    #if defined(SHELLYPLUS)
+    #if defined(SHELLY_1_PLUS)
     status["beacon_adv"] = this->beaconAdv;
     status["valve_operation"] = this->valveOperation;
     #endif
@@ -128,12 +136,26 @@ void ShellyManager::updateState(const String updated_properties[], uint16_t chan
 
     auto props = status.createNestedArray("updated_properties");
 
-    for (int i=0;i<changed_props_num; i++){
-        props.add(updated_properties[i]);
+    // appending pending updated props
+    Serial.println("PENDING PROPS: ");
+    Serial.flush();
+
+    for(int i=0; i<pending_updated_props.size(); i++) {
+        Serial.println(i);
+        Serial.flush();
+        props.add(pending_updated_props[i]);
     }
 
+    Serial.println("END PENDING PROPS: ");
+    Serial.flush();
 
-    #ifndef SHELLYPLUS
+    // appending new props
+    for (int i=0;i<changed_props_num; i++){
+        props.add(updated_properties[i]);
+        pending_updated_props.push_back(updated_properties[i]);
+    }
+
+    #ifndef ESP32
     auto now_heap = system_get_free_heap_size();
 
     Serial.println("HEAP:" + String(now_heap));
@@ -152,35 +174,52 @@ void ShellyManager::updateState(const String updated_properties[], uint16_t chan
         Serial.flush();
     }
 
-    LogUDP("New state: " + this->serialized_shelly_state);
-    Serial.flush();
+    //LogUDP("New state: " + this->serialized_shelly_state);
+    //Serial.flush();
 
-    Serial.println("Setting prop value");
-    Serial.flush();
+    //Serial.println("Setting prop value");
+    //Serial.flush();
 
     ThingPropertyValue value;
     value.string = &this->serialized_shelly_state;
+    #ifndef SHELLY_1_PLUS
     this->shellyStatusProp.setValue(value);
+    #else
+    {
 
-    Serial.println("prop value set");
-    Serial.flush();
+        if (!BleManager::getInstance().operation_in_progress) {
+            this->shellyStatusProp.setValue(value);
+        }
+    }
+    #endif
+
+    //Serial.println("prop value set");
+    //Serial.flush();
 
 
-    if(updated_properties[0] == "beacon_adv" || updated_properties[0] == "valve_operation") return;
+    if (updated_properties != nullptr) {
+        if (updated_properties[0] == "beacon_adv" || updated_properties[0] == "valve_operation") return;
+    }
 
-    Serial.println("Persisting");
-    Serial.flush();
+    //Serial.println("Persisting");
+    //Serial.flush();
     this->persistRitenitiveOnFlash();
 
 }
 
 void ShellyManager::setRSSI(int32_t rssi) {
+    #ifdef SHELLY_1_PLUS
+    Lockguard l(this->stateMutex);
+    #endif
     this->rssi=rssi;
     String updated_props[1] = {"rssi"};
     this->updateState(updated_props, 1);
 }
 
 void ShellyManager::setMCUTemperature(float mcu_temperature){
+    #ifdef SHELLY_1_PLUS
+    Lockguard l(this->stateMutex);
+    #endif
     this->mcuTemperature = mcu_temperature;
     String updated_props[1] = {"mcu_temperature"};
     this->updateState(updated_props, 1);
@@ -188,6 +227,9 @@ void ShellyManager::setMCUTemperature(float mcu_temperature){
 
 
 void ShellyManager::setFwVersion(const String& version){
+    #ifdef SHELLY_1_PLUS
+    Lockguard l(this->stateMutex);
+    #endif
     this->fwVersion = version;
     String updated_props[1] = {"fw_version"};
     this->updateState(updated_props, 1);
@@ -196,6 +238,9 @@ void ShellyManager::setFwVersion(const String& version){
 
 void ShellyManager::setNetworkInfo(const String &ip, const String &gw, const String &apMacAddress,
                                    const String& wifiSSID, const String& wifiPassword) {
+    #ifdef SHELLY_1_PLUS
+    Lockguard l(this->stateMutex);
+    #endif
     this->ip_address = ip;
     this->gateway = gw;
     this->ap_mac_address = apMacAddress;
@@ -208,7 +253,9 @@ void ShellyManager::setNetworkInfo(const String &ip, const String &gw, const Str
 }
 
 void ShellyManager::inputChanged(int inputNumber, bool value) {
-
+    #ifdef SHELLY_1_PLUS
+    Lockguard l(this->stateMutex);
+    #endif
     if (inputNumber == 1) {
         if (value == this->input1)
             return;
@@ -232,6 +279,9 @@ void ShellyManager::inputChanged(int inputNumber, bool value) {
 
 
 void ShellyManager::shutterStatusChanged(ShutterStatus newStatus){
+    #ifdef SHELLY_1_PLUS
+    Lockguard l(this->stateMutex);
+    #endif
     this->shutterStatus = newStatus;
 
     String updated_props[1] = {"shutter_status"};
@@ -239,12 +289,21 @@ void ShellyManager::shutterStatusChanged(ShutterStatus newStatus){
 }
 
 void ShellyManager::updateValveOperation(const String& valveOperation){
+    #ifdef SHELLY_1_PLUS
+    Lockguard l(this->stateMutex);
+    #endif
     this->valveOperation = valveOperation;
     String updated_props[1] = {"valve_operation"};
     this->updateState(updated_props, 1);
 }
 
 void ShellyManager::updateBeaconAdv(const String& adv){
+    #ifdef SHELLY_1_PLUS
+    Lockguard l(this->stateMutex);
+    #endif
+    Serial.println("updateBeaconAdv");
+    Serial.flush();
+
     this->beaconAdv = adv;
     String updated_props[1] = {"beacon_adv"};
     this->updateState(updated_props, 1);
@@ -252,6 +311,9 @@ void ShellyManager::updateBeaconAdv(const String& adv){
 
 
 void ShellyManager::dimmerStatusChanged(uint32_t newStatus){
+    #ifdef SHELLY_1_PLUS
+    Lockguard l(this->stateMutex);
+    #endif
     this->dimmerStatus = newStatus;
 
     String updated_props[1] = {"dimmer_status"};
@@ -261,6 +323,9 @@ void ShellyManager::dimmerStatusChanged(uint32_t newStatus){
 
 
 void ShellyManager::RGBWStatusChanged(uint32_t r, uint32_t g, uint32_t b, uint32_t w){
+    #ifdef SHELLY_1_PLUS
+    Lockguard l(this->stateMutex);
+    #endif
     this->rgbwStatus.setRGBW(r, g, b,w);
 
     String updated_props[1] = {"rgbw_status"};
@@ -269,7 +334,9 @@ void ShellyManager::RGBWStatusChanged(uint32_t r, uint32_t g, uint32_t b, uint32
 }
 
 void ShellyManager::rChannelStatusChanged(uint32_t newStatus){
-
+    #ifdef SHELLY_1_PLUS
+    Lockguard l(this->stateMutex);
+    #endif
     LogUDP("R channel status changed");
 
     this->rgbwStatus.setR(newStatus);
@@ -280,24 +347,38 @@ void ShellyManager::rChannelStatusChanged(uint32_t newStatus){
 }
 
 void ShellyManager::gChannelStatusChanged(uint32_t newStatus){
+    #ifdef SHELLY_1_PLUS
+    Lockguard l(this->stateMutex);
+    #endif
     this->rgbwStatus.setG(newStatus);
     String updated_props[1] = {"rgbw_status"};
     this->updateState(updated_props, 1);
 }
 
 void ShellyManager::bChannelStatusChanged(uint32_t newStatus) {
+    #ifdef SHELLY_1_PLUS
+    Lockguard l(this->stateMutex);
+    #endif
     this->rgbwStatus.setB(newStatus);
     String updated_props[1] = {"rgbw_status"};
     this->updateState(updated_props, 1);
 }
 
 void ShellyManager::wChannelStatusChanged(uint32_t newStatus){
+    #ifdef SHELLY_1_PLUS
+    Lockguard l(this->stateMutex);
+    #endif
     this->rgbwStatus.setW(newStatus);
     String updated_props[1] = {"rgbw_status"};
     this->updateState(updated_props, 1);
 }
 
 void ShellyManager::outputChanged(int outputNumber, bool value) {
+    #ifdef SHELLY_1_PLUS
+    Lockguard l(this->stateMutex);
+    #endif
+    Serial.println("OutputChanged ShellyManager");
+    Serial.flush();
 
     if (outputNumber == 1) {
 
@@ -331,7 +412,7 @@ void ShellyManager::outputChanged(int outputNumber, bool value) {
 ShellyManager::ShellyManager():
                                 macAddress(ShellyManager::get_mac_address()),
                                 deviceName(ShellyManager::getDeviceModel() + "-" + this->macAddress),
-                                #ifndef SHELLYPLUS
+                                #ifndef ESP32
                                 adapter(deviceName, WiFi.localIP(), 443),
                                 #else
                                 //adapter(deviceName, WiFi.gatewayIP(), 443),
@@ -407,7 +488,9 @@ void ShellyManager::add_shelly_action() {
 
 
 void ShellyManager::reportAsyncEnergyAndPower(float power, float energy) {
-
+    #ifdef SHELLY_1_PLUS
+    Lockguard l(this->stateMutex);
+    #endif
     power = deadzone(power, POWER_MEASUREMENT_DEADZONE_W);
     energy = deadzone(energy, ENERGY_MEASUREMENT_DEADZONE_W);
     this->energy1 = energy;
@@ -417,8 +500,32 @@ void ShellyManager::reportAsyncEnergyAndPower(float power, float energy) {
 
 }
 
-void ShellyManager::reportPeriodicEnergyAndPower1(float power1, float energy1) {
+void ShellyManager::reportPeriodicEnergyAndPower25(float power1, float energy1, float power2, float energy2) {
+    #ifdef SHELLY_1_PLUS
+    Lockguard l(this->stateMutex);
+    #endif
+    auto pow1 = deadzone(power1, POWER_MEASUREMENT_DEADZONE_W);
+    auto ene1 = deadzone(energy1, ENERGY_MEASUREMENT_DEADZONE_W);
 
+    auto pow2 = deadzone(power2, POWER_MEASUREMENT_DEADZONE_W);
+    auto ene2 = deadzone(energy2, ENERGY_MEASUREMENT_DEADZONE_W);
+
+    this->energy1 = ene1;
+    this->power1 = pow1;
+
+    this->energy2 = ene2;
+    this->power2 = pow2;
+
+    String updated_props[4] = {"power1", "energy1", "power2", "energy2"};
+    this->updateState(updated_props, 4);
+
+}
+
+
+void ShellyManager::reportPeriodicEnergyAndPower1(float power1, float energy1) {
+    #ifdef SHELLY_1_PLUS
+    Lockguard l(this->stateMutex);
+    #endif
     auto power = deadzone(power1, POWER_MEASUREMENT_DEADZONE_W);
     auto energy = deadzone(energy1, ENERGY_MEASUREMENT_DEADZONE_W);
     this->energy1 = energy;
@@ -428,7 +535,7 @@ void ShellyManager::reportPeriodicEnergyAndPower1(float power1, float energy1) {
 
 }
 
-#ifdef SHELLY_25
+#if defined(SHELLY_25) || defined(SHELLY_2PM_PLUS)
 void ShellyManager::reportPeriodicEnergyAndPower2(float power2, float energy2) {
 
     auto power = deadzone(power2, POWER_MEASUREMENT_DEADZONE_W);
@@ -442,6 +549,9 @@ void ShellyManager::reportPeriodicEnergyAndPower2(float power2, float energy2) {
 #endif
 
 void ShellyManager::setTemperature(float temperature) {
+    #ifdef SHELLY_1_PLUS
+    Lockguard l(this->stateMutex);
+    #endif
     this->temperature = temperature;
     String updated_props[1] = {"ambient_temperature"};
     this->updateState(updated_props, 1);
@@ -510,7 +620,7 @@ bool ShellyManager::persistRitenitiveOnFlash() {
     Serial.println(ret);
 
 
-    #ifndef SHELLYPLUS
+    #ifndef ESP32
     this->ritenitiveFile.write(data_dump.c_str());
     #else
     this->ritenitiveFile.write((const uint8_t*)  data_dump.c_str(), data_dump.length());
@@ -525,15 +635,15 @@ bool ShellyManager::persistRitenitiveOnFlash() {
 void ShellyManager::change_mode_action_handler(const ShellyOutputMode& mode, bool inverted) {
 
 
-       #if defined(SHELLY_1) || defined(SHELLYPLUS) || defined(SHELLY_1PM) || defined(SHELLY_DIMMER) || defined(SHELLY_RGBW) || defined(SHELLY_EM)
+       #if defined(SHELLY_1) || defined(SHELLY_1_PLUS) || defined(SHELLY_1PM_PLUS) || defined(SHELLY_1PM) || defined(SHELLY_DIMMER) || defined(SHELLY_RGBW) || defined(SHELLY_EM)
        if (mode == ShellyOutputMode::SHUTTER) return;
        #endif
 
-       #if defined(SHELLY_1) || defined(SHELLYPLUS) || defined(SHELLY_1PM) || defined(SHELLY_25) || defined(SHELLY_RGBW) || defined(SHELLY_EM)
+       #if defined(SHELLY_1) || defined(SHELLY_1_PLUS) || defined(SHELLY_1PM_PLUS) || defined(SHELLY_1PM) || defined(SHELLY_25) || defined(SHELLY_RGBW) || defined(SHELLY_EM) || defined(SHELLY_2PM_PLUS)
        if (mode == ShellyOutputMode::DIMMER) return;
        #endif
 
-       #if defined(SHELLY_1) || defined(SHELLYPLUS) || defined(SHELLY_1PM) || defined(SHELLY_DIMMER) || defined(SHELLY_25) || defined(SHELLY_EM)
+       #if defined(SHELLY_1) || defined(SHELLY_1_PLUS) || defined(SHELLY_1PM_PLUS) || defined(SHELLY_1PM) || defined(SHELLY_DIMMER) || defined(SHELLY_25) || defined(SHELLY_EM) || defined(SHELLY_2PM_PLUS)
        if (mode == ShellyOutputMode::RGBW || mode == ShellyOutputMode::LED_DIMMER) return;
        #endif
 
@@ -559,7 +669,7 @@ void ShellyManager::change_mode_action_handler(const ShellyOutputMode& mode, boo
         d.createNestedObject("mode");
         d["mode"] = mode;
 
-        #if defined(SHELLY_25)
+        #if defined(SHELLY_25) || defined(SHELLY_2PM_PLUS)
         d.createNestedObject("inverted");
         d["inverted"] = inverted;
         #endif
@@ -569,7 +679,7 @@ void ShellyManager::change_mode_action_handler(const ShellyOutputMode& mode, boo
 
         LogUDP("Saving:" + data_dump);
 
-        #ifndef SHELLYPLUS
+        #ifndef ESP32
         hw_conf_file.write(data_dump.c_str());
         #else
         hw_conf_file.write((const uint8_t*) data_dump.c_str(), data_dump.length());
@@ -633,7 +743,7 @@ void ShellyManager::change_wifi_action_handler(const String& wifi_ssid, const St
             String data_dump;
             serializeJsonPretty(d, data_dump);
 
-            #ifndef SHELLYPLUS
+            #ifndef ESP32
             conf_file.write(data_dump.c_str());
             #else
             conf_file.write((const uint8_t*)  data_dump.c_str(), data_dump.length());
@@ -653,7 +763,7 @@ void ShellyManager::shelly_action_handler(const JsonVariant &input) {
 
     LogUDP("SHELLY_ACTION");
 
-    #ifndef SHELLYPLUS
+    #ifndef ESP32
     auto now_heap = system_get_free_heap_size();
 
     Serial.println("HEAP:" + String(now_heap));
@@ -678,7 +788,7 @@ void ShellyManager::shelly_action_handler(const JsonVariant &input) {
 
 
             if (
-                    action_name != "set_output" && action_name != "set_dimmer" && action_name != "pulse_action" &&
+                    action_name != "get_status_update" && action_name != "set_output" && action_name != "set_dimmer" && action_name != "pulse_action" &&
                     action_name != "change_wifi" && action_name != "change_mode" && action_name != "update_action" &&
                     action_name != "set_shutter" && action_name != "set_rgbw" && action_name != "set_led_dimmer"
                     && action_name != "control_radiator_valve"
@@ -698,7 +808,12 @@ void ShellyManager::shelly_action_handler(const JsonVariant &input) {
 
             LogUDP("action_name: " + action_name + " action_payload " + action_payload);
 
-            if (action_name == "set_output") {
+            if (action_name == "get_status_update") {
+                ShellyManager::getInstance().updateState(nullptr, 0);
+            }
+
+
+                if (action_name == "set_output") {
                 if(action_payload_obj.containsKey("output_number") && action_payload_obj.containsKey("value")) {
                     int port = action_payload_obj["output_number"];
                     bool newValue = action_payload_obj["value"];
@@ -801,7 +916,7 @@ void ShellyManager::shelly_action_handler(const JsonVariant &input) {
                 if(action_payload_obj.containsKey("mac_address") && action_payload_obj.containsKey("value")) {
                     bool newValue = action_payload_obj["value"];
                     String mac = action_payload_obj["mac_address"].as<String>();
-                    #ifdef SHELLYPLUS
+                    #ifdef SHELLY_1_PLUS
                     BleManager::getInstance().controlRadiator(mac, newValue);
                     #endif
                 }
@@ -821,7 +936,7 @@ void ShellyManager::shelly_action_handler(const JsonVariant &input) {
 
 void ShellyManager::get_mode(){
 
-    #if defined(SHELLY_1) || defined(SHELLYPLUS) || defined(SHELLY_1PM) || defined(SHELLY_25)  || defined(SHELLY_EM)
+    #if defined(SHELLY_1) || defined(SHELLY_1_PLUS) || defined(SHELLY_1PM) || defined(SHELLY_25)  || defined(SHELLY_EM) || defined(SHELLY_2PM_PLUS)
     this->mode = ShellyOutputMode::RELAY;
     #endif
 
@@ -869,7 +984,7 @@ void ShellyManager::get_mode(){
         LogUDP("Reading:" + String(mode));
     }
 
-    #if defined(SHELLY_25)
+    #if defined(SHELLY_25) || defined(SHELLY_2PM_PLUS)
     if (loaded_json.containsKey("inverted")) {
         this->inverted = loaded_json["inverted"].as<bool>();
     }
@@ -882,7 +997,7 @@ void ShellyManager::get_mode(){
 
 void ShellyManager::shutter_action_handler(const ShutterCommand& shutter_command) {
 
-    #ifdef SHELLY_25
+    #if defined(SHELLY_25) || defined(SHELLY_2PM_PLUS)
 
     auto mode = ShellyManager::getInstance().mode;
 
@@ -982,6 +1097,14 @@ void ShellyManager::set_output_action_handler(const int& port, const bool& newVa
     if (mode != ShellyOutputMode::RELAY) return;
 
     HardwareController::getInstance().setRelay(port, newValue);
+}
+
+bool ShellyManager::isOutput1() const {
+    return output1;
+}
+
+bool ShellyManager::isOutput2() const {
+    return output2;
 }
 
 

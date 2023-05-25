@@ -1,4 +1,4 @@
-#ifndef SHELLYPLUS
+#ifndef ESP32
 #include "ESP8266httpUpdate.h"
 #else
 #include <HTTPClient.h>
@@ -45,11 +45,12 @@ void DomoUpdater::setFwToUpdate(const String& url){
     this->updateRetries = 0;
 
     uint32_t slotDurationMS = 100;
+
     long backoff = random(0, 600);
 
-    for (int i = 0; i < backoff; ++i) {
-        delay(slotDurationMS);
-    }
+    //for (int i = 0; i < backoff; ++i) {
+    //    delay(slotDurationMS);
+    //}
 
     this->timerUpdater.start();
 
@@ -62,7 +63,7 @@ bool DomoUpdater::update() {
 
     WiFiClient c;
 
-    #ifdef SHELLYPLUS
+    #if defined(SHELLY_1_PLUS) || defined(SHELLY_1PM_PLUS) || defined(SHELLY_2PM_PLUS)
         HTTPClient client;
         client.begin(this->fwVersionToSet);
         // Get file, just to check if each reachable
@@ -108,7 +109,7 @@ bool DomoUpdater::update() {
 
     #endif
 
-    #ifndef SHELLYPLUS
+    #ifndef ESP32
     auto ret = ESPhttpUpdate.update(c, this->fwVersionToSet, "DOMO_FW");
 
 

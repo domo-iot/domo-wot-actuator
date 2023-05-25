@@ -1,6 +1,6 @@
 #include "secutils.h"
 
-#ifndef SHELLYPLUS
+#ifndef ESP32
 bool getDomoSecMaterial(String &serverCert, String &serverKey,  String& authUser,  String& authPassword){
 
     auto file = SPIFFS.open(SEC_CONFIG_FILE, "r");

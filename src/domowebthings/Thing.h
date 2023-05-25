@@ -439,7 +439,7 @@ public:
   String description;
   const char **type;
 
-  #ifndef SHELLYPLUS
+  #ifndef ESP32
   WebSockets4WebServerSecure *ws = nullptr;
   #else
   WebSocketsClient *ws = nullptr;
@@ -456,7 +456,7 @@ public:
       : id(_id), title(_title), type(_type) {}
 
   ~ThingDevice() {
-    #ifndef SHELLYPLUS
+    #ifndef ESP32
     if (ws)
       delete ws;
     #endif
@@ -488,7 +488,7 @@ public:
     String jsonStr;
     serializeJson(message, jsonStr);
     // Inform all connected ws clients about action statuses
-    #ifndef SHELLYPLUS
+    #ifndef ESP32
     ((WebSockets4WebServerSecure *)ws)->broadcastTXT(jsonStr);
     #endif
   }
@@ -658,7 +658,7 @@ public:
 
     // Inform all subscribed ws clients about events
 
-    #ifndef SHELLYPLUS
+    #ifndef ESP32
     this->ws->broadcastTXT(jsonStr);
     #else
     this->ws->sendTXT(jsonStr);
